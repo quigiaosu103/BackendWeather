@@ -1,3 +1,8 @@
+using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
+using WeatherBackend.Model;
+using WeatherBackend.MyServices;
+
 namespace WeatherBackend
 {
     public class Worker : BackgroundService
@@ -11,11 +16,23 @@ namespace WeatherBackend
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+
+            MyRefData.getCityData(_logger);
             while (!stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
-                //Console.WriteLine("Worker running at: {time}", DateTimeOffset.Now);
-                await Task.Delay(1000, stoppingToken);
+                if (MyRefData.getCitiesNum()>0)
+                {
+                    var citiesData = MyRefData.getListCityData();
+                    foreach(Model.City city in citiesData)
+                    {
+                        if(MyRefData.getCitiesNum()>0)
+                        {
+                            APICall.GetWeather(_logger, city.getLot(), city.getLat());
+                        }
+                    }
+
+                }
+                await Task.Delay(10000, stoppingToken);
             }
         }
     }
