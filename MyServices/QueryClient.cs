@@ -8,54 +8,79 @@ using Naami.SuiNet.Apis.Event.Query;
 using Naami.SuiNet.Apis.Read;
 using Naami.SuiNet.JsonRpc;
 using Naami.SuiNet.Types;
+using Naami.SuiNet.Apis.Quorum;
+using Naami.SuiNet.Apis.TransactionBuilder;
+using Naami.SuiNet.JsonRpc;
+using Naami.SuiNet.Signer;
+using Naami.SuiNet.Types;
+
 
 namespace WeatherBackend.MyServices
 {
     internal class QueryClient
     {
-        private readonly IReadApi _readApi;
-        private readonly IEventApi _eventApi;
+        private const string ModuleName = "weather";
+
+        private readonly Ed25519KeyPair _keyPair;
+        private readonly SuiAddress _signerAddress;
 
         private readonly ObjectId _packageId;
 
-        private const string CapyModuleName = "capy";
-        private const string ItemModuleName = "capy_item";
+        private readonly ITransactionSigner _signer = new TransactionSigner();
+        private readonly ITransactionBuilderApi _builderApi;
+        private readonly IQuorumApi _quorumApi;
 
-        public QueryClient(IJsonRpcClient jsonRpcClient, ObjectId packageId)
+        public QueryClient(IJsonRpcClient jsonRpcClient, Ed25519KeyPair keyPair, ObjectId packageId,
+            ObjectId capyPostObjectId, ObjectId capyRegistryObjectId, SuiAddress signerAddress)
         {
+            _builderApi = new TransactionBuilderApi(jsonRpcClient);
+            _quorumApi = new QuorumApi(jsonRpcClient);
+
+            _keyPair = keyPair;
             _packageId = packageId;
-            _readApi = new ReadApi(jsonRpcClient);
-            _eventApi = new EventApi(jsonRpcClient);
+            _signerAddress = signerAddress;
         }
 
-        public async Task<Weather> GetCapy(ObjectId id)
+
+        public Task UpdateWeatherCityOracle(
+            ObjectId oracle, 
+            int geoname_id, 
+            int weather_id, 
+            int pressure, 
+            int hunidity,
+            int visibility, 
+            int wind_speed, 
+            int wind_deg, 
+            int cloud,
+            int dt
+       )  => ExecuteTransaction("update", Array.Empty<SuiObjectType>(),
+           new[] { (object)oracle, geoname_id, weather_id, pressure, hunidity, visibility, wind_speed, wind_deg, cloud, dt });
+
+        private async Task ExecuteTransaction(string function, SuiObjectType[] typeArgs, object[] callArgs)
         {
-            var response = await _readApi.GetObject<Weather>(id);
-            return response.ExistsResult.Data.Fields!;
-        }
+            var builder = await _builderApi.MoveCall(
+                _signerAddress,
+                _packageId,
+                ModuleName,
+                function,
+                typeArgs,
+                callArgs,
+                10000
+            );
 
-        public async Task<CapyItem[]> GetCapyItems(ObjectId capyObjectId)
-        {
-            var dynamicCapyObjectIds = new List<ObjectId>();
+            var signature = _signer.SignTransaction(
+                new Intent(Scope.TransactionData),
+                Convert.FromBase64String(builder.TxBytes),
+                _keyPair
+            );
 
-            await foreach (var dynamicFieldInfos in _readApi.GetDynamicFieldsStream(capyObjectId))
-            {
-                dynamicCapyObjectIds.AddRange(
-                    dynamicFieldInfos
-                        .Where(x => x.ObjectType.Package == _packageId)
-                        .Where(x => x.ObjectType.Module == ItemModuleName)
-                        .Where(x => x.ObjectType.Struct == "CapyItem")
-                        .Select(x => x.ObjectId)
-                );
-            }
-
-            var tasks = dynamicCapyObjectIds
-                .Select(id => _readApi.GetObject<CapyItem>(id))
-                .ToArray();
-
-            await Task.WhenAll(tasks);
-
-            return tasks.Select(x => x.Result.ExistsResult!.Data.Fields!).ToArray();
+            _ = await _quorumApi.ExecuteTransaction(
+                builder.TxBytes,
+                SignatureScheme.ED25519,
+                signature,
+                Convert.ToBase64String(_keyPair.PublicKey),
+                ExecuteTransactionRequestType.WaitForEffectsCert
+            );
         }
 
     }

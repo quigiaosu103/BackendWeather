@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Naami.SuiNet.JsonRpc;
+using Naami.SuiNet.Signer;
 using Newtonsoft.Json.Linq;
 using WeatherBackend.Model;
 using WeatherBackend.MyServices;
@@ -16,6 +18,8 @@ namespace WeatherBackend
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            QueryClient queryClient = new QueryClient(new JsonRpcClient("https://fullnode.devnet.sui.io"), new Ed25519KeyPair());
+            
 
             MyRefData.getCityData(_logger);
             while (!stoppingToken.IsCancellationRequested)
